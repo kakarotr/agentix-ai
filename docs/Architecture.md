@@ -60,8 +60,7 @@ LLM provider 的抽象层。内部使用 neutral message format，表达能力�
 
 支持 Streaming 和 Structured Output：
 - Streaming：ModelClient 处理 provider 原始流，向上暴露，由 Runner 消费并转化为类型化事件
-- Structured Output：ModelClient 层将 Zod schema 转为 provider 要求的格式传给 LLM；校验逻辑在上层处理，不在 ModelClient 内
-
+- Structured Output：通过独立的 `generateStructured<T>` 方法暴露，不与 `generate` 共用。ModelClient 将 Zod schema 转为 provider 要求的格式传给 LLM，拿回响应后在内部完成JSON 解析与 schema 校验，直接返回类型化结果 `Promise<z.infer<T>>`。校验失败抛出语义明确的错误类型，不透传原始 Zod error。`stream` 不支持结构化输出。
 ### Tool System
 工具定义与执行。MCP 作为 Tool System 的一个 adapter，与函数工具平级，需额外处理 MCP server 的连接生命周期（连接管理、断线重连、capability negotiation）。
 

@@ -14,3 +14,17 @@ import {
   AssistantMessage,
   ModelMessage
 } from './message.js'
+
+export {
+  TextBlock,
+  ImageBlock,
+  ToolUseBlock,
+  ToolResultBlock,
+  ThinkingBlock,
+  RedactedThinkingBlock,
+  UserContentBlock,
+  AssistantContentBlock,
+  UserMessage,
+  AssistantMessage,
+  ModelMessage
+}

@@ -1,4 +1,7 @@
 import { TextBlock } from "@/messages/content-block.js"
+import { ModelClient } from "../client.js"
+import { MessageStreamEvent, ModelRequest, ModelResponse } from "../types.js"
+import { ZodType, output } from "zod"
 
 interface ImageBlock {
   type: "image_url"
@@ -40,10 +43,30 @@ interface ToolMessage {
 
 type OpenAIModelMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage
 
-export {
-  SystemMessage,
-  UserMessage,
-  AssistantMessage,
-  ToolMessage,
-  OpenAIModelMessage
+class OpenAIModelClient extends ModelClient {
+  async generate(request: ModelRequest): Promise<ModelResponse> {
+    const response = fetch(this.baseURL, {
+      headers: this.buildHeader(),
+    })
+
+    const responseData = await response
+      .then(value => value.json())
+      .catch(err => console.error(err))
+    
+    return Promise.reject()
+  }
+  stream(request: ModelRequest): AsyncIterable<MessageStreamEvent> {
+    throw new Error("Method not implemented.")
+  }
+  structuredOutput<T extends ZodType>(request: ModelRequest, schema: T): Promise<output<T>> {
+    throw new Error("Method not implemented.")
+  }
+
+  private buildHeader() {
+    return {
+      "Content-Type": "application/json",
+      "Accept": "application/json",
+      "Authorization": `Bearer ${this.apiKey}`
+    }
+  }
 }
