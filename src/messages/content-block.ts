@@ -23,7 +23,7 @@ interface ToolUseBlock {
 
 interface ToolResultBlock {
   type: "tool_result"
-  tool_use_id: string
+  toolUseId: string
   content: string | Array<TextBlock | ImageBlock>
 }
 

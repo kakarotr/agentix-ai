@@ -2,12 +2,12 @@ import { AssistantContentBlock, UserContentBlock } from "./content-block.js"
 
 interface UserMessage {
   role: "user"
-  content: UserContentBlock[]
+  content: string | UserContentBlock[]
 }
 
 interface AssistantMessage {
   role: "assistant"
-  content: AssistantContentBlock[]
+  content: string | AssistantContentBlock[]
 }
 
 type ModelMessage = UserMessage | AssistantMessage
