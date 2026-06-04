@@ -1,4 +1,4 @@
-import {
+import type {
   TextBlock,
   ImageBlock,
   ToolUseBlock,
@@ -9,13 +9,13 @@ import {
   AssistantContentBlock
 } from './content-block.js'
 
-import {
+import type {
   UserMessage,
   AssistantMessage,
   ModelMessage
 } from './message.js'
 
-export {
+export type {
   TextBlock,
   ImageBlock,
   ToolUseBlock,

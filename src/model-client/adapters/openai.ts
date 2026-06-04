@@ -33,31 +33,32 @@ interface ToolCall {
 interface AssistantMessage {
   role: "assistant"
   content: string | null
-  toolCalls?: ToolCall[]
+  tool_calls?: ToolCall[]
 }
 
 interface ToolMessage {
   role: "tool"
   content: string
-  toolCallId: string
+  tool_call_id: string
 }
 
 type OpenAIModelMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage
 
 class OpenAIModelClient extends ModelClient {
   async generate(request: ModelRequest): Promise<ModelResponse> {
-    const response = fetch(this.baseURL, {
-      headers: {
-        "Content-Type": "application/json",
-        "Accept": "application/json",
-        "Authorization": `Bearer ${this.apiKey}`
-      },
-      body: this.buildBody(request)
-    })
+    // const response = fetch(this.baseURL, {
+    //   headers: {
+    //     "Content-Type": "application/json",
+    //     "Accept": "application/json",
+    //     "Authorization": `Bearer ${this.apiKey}`
+    //   },
+    //   body: this.buildBody(request)
+    // })
 
-    const responseData = await response
-      .then(value => value.json())
-      .catch(err => console.error(err))
+    // const responseData = await response
+    //   .then(value => value.json())
+    //   .catch(err => console.error(err))
+    console.log(this.buildBody(request))
 
     return Promise.reject()
   }
@@ -74,8 +75,7 @@ class OpenAIModelClient extends ModelClient {
     let bindTools = undefined
     if (request.tools) {
       bindTools = request.tools.map(tool => {
-        const jsonSchema = z.toJSONSchema(tool.inputSchema)
-        delete jsonSchema.$schema
+        const { $schema, ...parameters } = z.toJSONSchema(tool.inputSchema)
 
         return {
           type: "function",
@@ -83,9 +83,9 @@ class OpenAIModelClient extends ModelClient {
             name: tool.name,
             description: tool.description,
             parameters: {
-              ...jsonSchema
+              ...parameters
             },
-
+            struct: false
           }
         }
       })
@@ -145,7 +145,7 @@ class OpenAIModelClient extends ModelClient {
                   .map(item => item.text)
                 blockContent = textBlocks.join("")
               }
-              openaiMessages.push({ role: "tool", toolCallId: block.toolUseId, content: blockContent })
+              openaiMessages.push({ role: "tool", tool_call_id: block.toolUseId, content: blockContent })
             } else {
               if (block.type === "text") {
                 textBlocks.push(block)
@@ -202,7 +202,7 @@ class OpenAIModelClient extends ModelClient {
           }
         }
 
-        openaiMessages.push({ role: "assistant", content, ...(toolCalls !== undefined ? { toolCalls } : {}) })
+        openaiMessages.push({ role: "assistant", content, ...(toolCalls !== undefined ? { tool_calls: toolCalls } : {}) })
       }
     }
 

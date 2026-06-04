@@ -12,7 +12,7 @@ interface AssistantMessage {
 
 type ModelMessage = UserMessage | AssistantMessage
 
-export {
+export type {
   UserMessage,
   AssistantMessage,
   ModelMessage

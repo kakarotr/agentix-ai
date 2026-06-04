@@ -1,7 +1,7 @@
-import {
+import type {
   ToolDefinition
 } from './types.js'
 
-export {
+export type {
   ToolDefinition
 }

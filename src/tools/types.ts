@@ -11,7 +11,7 @@ interface Tool <TSchema extends z.ZodObject<z.ZodRawShape>> extends ToolDefiniti
   execute: (input: z.infer<TSchema>) => Promise<unknown>
 }
 
-export {
+export type {
   Tool,
   ToolDefinition
 }

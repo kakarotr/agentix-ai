@@ -41,7 +41,7 @@ interface RedactedThinkingBlock {
 type UserContentBlock = TextBlock | ImageBlock | ToolResultBlock
 type AssistantContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | RedactedThinkingBlock
 
-export {
+export type {
   TextBlock,
   ImageBlock,
   ToolUseBlock,
