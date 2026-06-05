@@ -32,6 +32,7 @@ interface ModelRequest {
 
 interface ModelResponse {
   id: string
+  model: string
   message: AssistantMessage
   stopReason: StopReason
   usage: Usage

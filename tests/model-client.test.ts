@@ -2,24 +2,17 @@ import { OpenAIModelClient } from "@/index"
 import z from "zod"
 
 const client = new OpenAIModelClient({
-  baseURL: "",
-  apiKey: ""
+  baseURL: "https://api.deepseek.com/v1/chat/completions",
+  apiKey: "sk-ec75c7019f3740fc86049ce2092b61a6"
 })
 
 client.generate({
-  model: "claude-sonnet-4-6",
-  system: "系统提示词",
+  model: "deepseek-v4-flash",
+  system: "你是一个智能助手，帮我完成任务",
   messages: [
     {
       role: "user",
-      content: [
-        { type: "text", text: "解释一下这张图片" },
-        { type: "image", source: { type: "base64", mediaType: "image", data: "xxxx" } }
-      ]
-    },
-    {
-      role: "assistant",
-      content: "xxxxxxx"
+      content: "查询今天的新闻"
     }
   ],
   tools: [
