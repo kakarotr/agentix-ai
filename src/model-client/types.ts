@@ -1,9 +1,15 @@
 import { AssistantMessage, ModelMessage, ToolUseBlock } from "@/messages/index.js";
 import { ToolDefinition } from "@/tools/types.js";
 
+interface OutputTokensDetails {
+  thinkingTokens: number
+}
+
 interface Usage {
   inputTokens: number
   outputTokens: number
+  outputTokensDetails?: OutputTokensDetails
+  totalTokens: number
 }
 
 type MessageStreamEvent = 

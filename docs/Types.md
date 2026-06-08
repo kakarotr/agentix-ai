@@ -51,8 +51,8 @@ interface RedactedThinkingBlock {
   data: string
 }
 
-type UserContentBlock = string | TextBlock | ImageBlock | ToolResultBlock
-type AssistantContentBlock = string | TextBlock | ThinkingBlock | ToolUseBlock | RedactedThinkingBlock
+type UserContentBlock = TextBlock | ImageBlock | ToolResultBlock
+type AssistantContentBlock = TextBlock | ThinkingBlock | ToolUseBlock | RedactedThinkingBlock
 
 export {
   TextBlock,
@@ -96,9 +96,15 @@ export {
 import { AssistantMessage, ModelMessage, ToolUseBlock } from "@/messages/index.js";
 import { ToolDefinition } from "@/tools/types.js";
 
+interface OutputTokensDetails {
+  thinkingTokens: number
+}
+
 interface Usage {
   inputTokens: number
   outputTokens: number
+  outputTokensDetails?: OutputTokensDetails
+  totalTokens: number
 }
 
 type MessageStreamEvent = 

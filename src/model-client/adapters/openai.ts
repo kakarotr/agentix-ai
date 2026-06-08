@@ -1,9 +1,9 @@
-import { AssistantContentBlock, TextBlock, ToolUseBlock } from "@/messages/content-block.js"
-import { ModelClient } from "../client.js"
-import { MessageStreamEvent, ModelRequest, ModelResponse } from "../types.js"
 import z, { ZodType, output } from "zod"
+import { AssistantContentBlock, TextBlock, ToolUseBlock } from "@/messages/content-block.js"
+import { ModelClient } from "@/model-client/client.js"
+import { MessageStreamEvent, ModelRequest, ModelResponse, StopReason } from "@/model-client/types.js"
 import { ModelMessage } from "@/messages/message.js"
-import { ModelHTTPError, ModelNetworkError } from "../errors.js"
+import { ModelHTTPError, ModelNetworkError, StructuredOutputParseError } from "@/model-client/errors.js"
 
 interface ImageBlock {
   type: "image_url"
@@ -69,6 +69,9 @@ interface OpenAIResponse {
   usage: {
     prompt_tokens: number
     completion_tokens: number
+    completion_tokens_details?: {
+      reasoning_tokens: number
+    }
     total_tokens: number
   }
 }
@@ -248,17 +251,81 @@ class OpenAIModelClient extends ModelClient {
   }
 
   private convertResponse(data: OpenAIResponse): ModelResponse {
-    const hasThinkingContent = !!data.choices[0]!.message.reasoning_content
-    const hasToolUse = !!data.choices[0]!.message.tool_calls
-    const generateContent = data.choices[0]!.message.content
-    let content: string | AssistantContentBlock[] | undefined
+    const choice = data.choices[0]!
+
+    const hasThinkingContent = !!choice.message.reasoning_content
+    const hasToolUse = !!choice.message.tool_calls
+    const generateContent = choice.message.content
+    let content: string | AssistantContentBlock[]
 
     if (!hasThinkingContent && !hasToolUse) {
-      content = data.choices[0]!.message.content
+      content = choice.message.content || ""
     } else {
+      content = []
 
       if (hasThinkingContent) {
+        content.push({
+          type: "thinking",
+          thinking: choice.message.reasoning_content!,
+          signature: ""
+        })
+      }
 
+      if (generateContent) {
+        content.push({
+          type: "text",
+          text: generateContent
+        })
+      }
+
+      if (hasToolUse) {
+        const toolCalls = data.choices[0]!.message.tool_calls!
+        for (const toolCall of toolCalls) {
+          
+          let input: Record<string, unknown>
+          try {
+            input = JSON.parse(toolCall.function.arguments)
+          } catch (err) {
+            throw new StructuredOutputParseError(
+              `Failed to parse tool call arguments for "${toolCall.function.name}"`,
+              { rawResponse: toolCall.function.arguments, cause: err }
+            )
+          }
+
+          content.push({
+            type: "tool_use",
+            id: toolCall.id,
+            name: toolCall.function.name,
+            input
+          })
+        }
+      }
+    }
+
+    let stopReason: StopReason = "end_turn"
+    const finishReason = data.choices[0]!.finish_reason
+    if (finishReason === "stop") {
+      stopReason = "end_turn"
+    } else if (finishReason === "length") {
+      stopReason = "max_tokens"
+    } else if (finishReason === "tool_calls") {
+      stopReason = "tool_use"
+    }
+
+    return {
+      id: data.id,
+      model: data.model,
+      message: { role: "assistant", content: content },
+      stopReason,
+      usage: {
+        inputTokens: data.usage.prompt_tokens,
+        outputTokens: data.usage.completion_tokens,
+        totalTokens: data.usage.total_tokens,
+        ...(data.usage.completion_tokens_details ? {
+          outputTokensDetails: {
+            thinkingTokens: data.usage.completion_tokens_details.reasoning_tokens
+          }
+        } : {})
       }
     }
   }
