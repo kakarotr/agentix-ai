@@ -6,7 +6,7 @@ const client = new OpenAIModelClient({
   apiKey: "sk-ec75c7019f3740fc86049ce2092b61a6"
 })
 
-const response = await client.generate({
+const response = client.stream({
   model: "deepseek-v4-flash",
   system: "你是一个智能助手，帮我完成任务",
   messages: [
@@ -33,4 +33,6 @@ const response = await client.generate({
   }
 })
 
-console.log(JSON.stringify(response))
+for await (const chunk of response) {
+  // console.log(chunk)
+}

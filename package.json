@@ -47,6 +47,7 @@
     ]
   },
   "dependencies": {
+    "eventsource-parser": "^3.1.0",
     "zod": "^4.4.3"
   }
 }

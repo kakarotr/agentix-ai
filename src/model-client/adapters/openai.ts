@@ -4,6 +4,8 @@ import { ModelClient } from "@/model-client/client.js"
 import { MessageStreamEvent, ModelRequest, ModelResponse, StopReason } from "@/model-client/types.js"
 import { ModelMessage } from "@/messages/message.js"
 import { ModelHTTPError, ModelNetworkError, StructuredOutputParseError } from "@/model-client/errors.js"
+import { createParser } from "eventsource-parser"
+import { EventSourceParserStream } from "eventsource-parser/stream"
 
 interface ImageBlock {
   type: "image_url"
@@ -103,15 +105,50 @@ class OpenAIModelClient extends ModelClient {
     return this.convertResponse(data)
   }
 
-  stream(request: ModelRequest): AsyncIterable<MessageStreamEvent> {
-    throw new Error("Method not implemented.")
+  async *stream(request: ModelRequest): AsyncIterable<MessageStreamEvent> {
+    let response: Response
+
+    try {
+      response = await fetch(this.baseURL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${this.apiKey}`
+        },
+        body: this.buildBody(request, true)
+      })
+    } catch (err) {
+      throw new ModelNetworkError("Request failed", { cause: err })
+    }
+    
+    if (!response.ok) {
+      const body = await response.text()
+      throw new ModelHTTPError(`OpenAI API error: ${response.status}`, { statusCode: response.status, responseBody: body })
+    }
+
+    if (!response.body) {
+      throw new ModelHTTPError(`OpenAI API error: ${response.status}`, { statusCode: response.status, responseBody: "null" })
+    }
+
+    const eventStream = response.body
+      .pipeThrough(new TextDecoderStream())
+      .pipeThrough(new EventSourceParserStream())
+
+    for await (const event of eventStream) {
+      console.log(event)
+      yield {
+        type: "text-delta",
+        text: event.data
+      }
+    }
   }
 
   structuredOutput<T extends ZodType>(request: ModelRequest, schema: T): Promise<output<T>> {
     throw new Error("Method not implemented.")
   }
 
-  private buildBody(request: ModelRequest) {
+  private buildBody(request: ModelRequest, isStream: boolean = false) {
     let bindTools = undefined
     if (request.tools) {
       bindTools = request.tools.map(tool => {
@@ -154,7 +191,9 @@ class OpenAIModelClient extends ModelClient {
       model: request.model,
       messages: this.convertMessages(request.system, request.messages),
       ...(bindTools !== undefined ? { tools: bindTools } : {}),
-      ...(samplingArgs !== undefined ? samplingArgs : {})
+      ...(samplingArgs !== undefined ? samplingArgs : {}),
+      stream: isStream,
+      ...(isStream ? { include_usage: true } : {})
     }
     return JSON.stringify(data)
   }

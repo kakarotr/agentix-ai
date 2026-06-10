@@ -13,8 +13,8 @@ interface Usage {
 }
 
 type MessageStreamEvent = 
-  | { type: "text_delta", text: string }
-  | { type: "thinking_delta", text: string }
+  | { type: "text-delta", text: string }
+  | { type: "thinking-delta", text: string }
   | { type: "tool_use", toolUse: ToolUseBlock }
   | { type: "complete", result: ModelResponse }
 
