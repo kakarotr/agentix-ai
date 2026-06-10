@@ -15,7 +15,7 @@ interface Usage {
 type MessageStreamEvent = 
   | { type: "text-delta", text: string }
   | { type: "thinking-delta", text: string }
-  | { type: "tool_use", toolUse: ToolUseBlock }
+  | { type: "tool-use", toolUse: ToolUseBlock }
   | { type: "complete", result: ModelResponse }
 
 type StopReason = "end_turn" | "tool_use" | "max_tokens"

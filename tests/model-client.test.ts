@@ -34,5 +34,5 @@ const response = client.stream({
 })
 
 for await (const chunk of response) {
-  // console.log(chunk)
+  console.log(chunk)
 }

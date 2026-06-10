@@ -1,7 +1,7 @@
 import z, { ZodType, output } from "zod"
 import { AssistantContentBlock, TextBlock, ToolUseBlock } from "@/messages/content-block.js"
 import { ModelClient } from "@/model-client/client.js"
-import { MessageStreamEvent, ModelRequest, ModelResponse, StopReason } from "@/model-client/types.js"
+import { MessageStreamEvent, ModelRequest, ModelResponse, StopReason, Usage } from "@/model-client/types.js"
 import { ModelMessage } from "@/messages/message.js"
 import { ModelHTTPError, ModelNetworkError, StructuredOutputParseError } from "@/model-client/errors.js"
 import { createParser } from "eventsource-parser"
@@ -47,6 +47,25 @@ interface ToolMessage {
 
 type OpenAIModelMessage = SystemMessage | UserMessage | AssistantMessage | ToolMessage
 
+interface OpenAIUsage {
+  prompt_tokens: number
+  completion_tokens: number
+  completion_tokens_details?: {
+    reasoning_tokens: number
+  }
+  total_tokens: number
+}
+
+interface OpenAIToolCall {
+  index: number
+  id: string
+  type: "function"
+  function: {
+    name: string
+    arguments: string
+  }
+}
+
 interface OpenAIResponse {
   id: string
   model: string
@@ -57,25 +76,32 @@ interface OpenAIResponse {
       role: "assistant"
       content?: string
       reasoning_content?: string
-      tool_calls?: Array<{
-        index: number
-        id: string
-        type: "function"
-        function: {
-          name: string
-          arguments: string
-        }
-      }>
+      tool_calls?: Array<OpenAIToolCall>
     }
   }>
-  usage: {
-    prompt_tokens: number
-    completion_tokens: number
-    completion_tokens_details?: {
-      reasoning_tokens: number
+  usage: OpenAIUsage
+}
+
+interface OpenAIStreamResponse {
+  id: string
+  model: string
+  choices: Array<{
+    index: number
+    delta: {
+      content?: string
+      reasoning_content?: string
+      tool_calls: Array<OpenAIToolCall>
     }
-    total_tokens: number
-  }
+    finish_reason?: 'stop' | 'length' | 'tool_calls'
+  }>
+  usage?: OpenAIUsage
+}
+
+interface OpenAIToolCallChunk {
+  id?: string
+  type?: string
+  name?: string
+  arguments?: string
 }
 
 class OpenAIModelClient extends ModelClient {
@@ -135,11 +161,116 @@ class OpenAIModelClient extends ModelClient {
       .pipeThrough(new TextDecoderStream())
       .pipeThrough(new EventSourceParserStream())
 
+    let id = ""
+    let modelName = ""
+    let stopReason: StopReason = "end_turn"
+    let usage: Usage = {
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0
+    }
+    const contentBuffer: string[] = []
+    const reasoningContentBuffer: string[] = []
+    const toolCallsBuffer: Record<number, OpenAIToolCallChunk> = {}
+
     for await (const event of eventStream) {
-      console.log(event)
+      if (event.data === "[DONE]") {
+        break
+      }
+      const chunk = JSON.parse(event.data) as OpenAIStreamResponse
+
+      id = chunk.id
+      modelName = chunk.model
+
+      const choice = chunk.choices[0]!
+      const delta = choice.delta
+
+      if (delta.content) {
+        contentBuffer.push(delta.content)
+        yield {
+          type: "text-delta",
+          text: delta.content
+        }
+      }
+
+      if (delta.reasoning_content) {
+        reasoningContentBuffer.push(delta.reasoning_content)
+        yield {
+          type: "thinking-delta",
+          text: delta.reasoning_content
+        }
+      }
+
+      if (choice.finish_reason) {
+        stopReason = this.parseStopReason(choice.finish_reason)
+      }
+
+      if (chunk.usage) {
+        usage = this.parseUsage(chunk.usage)
+      }
+
+      if (delta.tool_calls) {
+        for (const toolCall of delta.tool_calls) {
+          const index = toolCall.index
+          const toolCallId = toolCall.id
+          const toolName = toolCall?.function?.name
+          const args = toolCall?.function?.arguments
+          
+          if (toolCallId) {
+            toolCallsBuffer[index] = { ...toolCallsBuffer[index], id: toolCallId, type: "function", arguments: "" }
+          }
+
+          if (toolName) {
+            toolCallsBuffer[index] = { ...toolCallsBuffer[index], name: toolName }
+          }
+
+          if (args) {
+            toolCallsBuffer[index]!.arguments += args
+          }
+        }
+      }
+    }
+
+    const toolCalls: OpenAIToolCall[] = []
+
+    for (const [key, value] of Object.entries(toolCallsBuffer)) {
+      const toolCall: OpenAIToolCall = {
+        index: Number(key),
+        type: "function",
+        id: value.id!,
+        function: {
+          name: value.name!,
+          arguments: value.arguments!
+        }
+      }
+      toolCalls.push(toolCall)
+
       yield {
-        type: "text-delta",
-        text: event.data
+        type: "tool-use",
+        toolUse: {
+          id: value.id!,
+          type: "tool_use",
+          name: value.name!,
+          input: JSON.parse(value.arguments!)
+        }
+      }
+    }
+
+    yield {
+      type: "complete",
+      result: {
+        id,
+        model: modelName,
+        message: {
+          role: "assistant",
+          content: this.parseContent(
+            contentBuffer.length > 0 ? contentBuffer.join("") : undefined,
+            reasoningContentBuffer.length > 0 ? reasoningContentBuffer.join("") : undefined,
+            toolCalls.length > 0 ? toolCalls : undefined
+          )
+        },
+        stopReason,
+        usage
       }
     }
   }
@@ -291,21 +422,62 @@ class OpenAIModelClient extends ModelClient {
 
   private convertResponse(data: OpenAIResponse): ModelResponse {
     const choice = data.choices[0]!
+    const stopReason = this.parseStopReason(choice.finish_reason)
+    return {
+      id: data.id,
+      model: data.model,
+      message: { 
+        role: "assistant", 
+        content: this.parseContent(choice.message.content, choice.message.reasoning_content, choice.message.tool_calls) 
+      },
+      stopReason,
+      usage: this.parseUsage(data.usage)
+    }
+  }
 
-    const hasThinkingContent = !!choice.message.reasoning_content
-    const hasToolUse = !!choice.message.tool_calls
-    const generateContent = choice.message.content
+  private parseStopReason(finishReason: 'stop' | 'length' | 'tool_calls'): StopReason {
+    let stopReason: StopReason = "end_turn"
+    if (finishReason === "stop") {
+      stopReason = "end_turn"
+    } else if (finishReason === "length") {
+      stopReason = "max_tokens"
+    } else if (finishReason === "tool_calls") {
+      stopReason = "tool_use"
+    }
+    return stopReason
+  }
+
+  private parseUsage(usage: OpenAIUsage): Usage {
+    return {
+      inputTokens: usage.prompt_tokens,
+      outputTokens: usage.completion_tokens,
+      totalTokens: usage.total_tokens,
+      ...(usage.completion_tokens_details ? {
+        outputTokensDetails: {
+          thinkingTokens: usage.completion_tokens_details.reasoning_tokens
+        }
+      } : {})
+    }
+  }
+
+  private parseContent(
+    generateContent: string | undefined, 
+    reasoningContent: string | undefined, 
+    toolCalls: OpenAIToolCall[] | undefined
+  ) {
     let content: string | AssistantContentBlock[]
+    const hasThinkingContent = !!reasoningContent
+    const hasToolUse = !!toolCalls
 
     if (!hasThinkingContent && !hasToolUse) {
-      content = choice.message.content || ""
+      content = generateContent || ""
     } else {
       content = []
 
       if (hasThinkingContent) {
         content.push({
           type: "thinking",
-          thinking: choice.message.reasoning_content!,
+          thinking: reasoningContent!,
           signature: ""
         })
       }
@@ -318,9 +490,8 @@ class OpenAIModelClient extends ModelClient {
       }
 
       if (hasToolUse) {
-        const toolCalls = data.choices[0]!.message.tool_calls!
         for (const toolCall of toolCalls) {
-          
+
           let input: Record<string, unknown>
           try {
             input = JSON.parse(toolCall.function.arguments)
@@ -340,33 +511,7 @@ class OpenAIModelClient extends ModelClient {
         }
       }
     }
-
-    let stopReason: StopReason = "end_turn"
-    const finishReason = data.choices[0]!.finish_reason
-    if (finishReason === "stop") {
-      stopReason = "end_turn"
-    } else if (finishReason === "length") {
-      stopReason = "max_tokens"
-    } else if (finishReason === "tool_calls") {
-      stopReason = "tool_use"
-    }
-
-    return {
-      id: data.id,
-      model: data.model,
-      message: { role: "assistant", content: content },
-      stopReason,
-      usage: {
-        inputTokens: data.usage.prompt_tokens,
-        outputTokens: data.usage.completion_tokens,
-        totalTokens: data.usage.total_tokens,
-        ...(data.usage.completion_tokens_details ? {
-          outputTokensDetails: {
-            thinkingTokens: data.usage.completion_tokens_details.reasoning_tokens
-          }
-        } : {})
-      }
-    }
+    return content
   }
 }
 
