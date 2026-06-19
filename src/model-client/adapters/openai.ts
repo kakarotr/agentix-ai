@@ -116,7 +116,7 @@ class OpenAIModelClient extends ModelClient {
           "Accept": "application/json",
           "Authorization": `Bearer ${this.apiKey}`
         },
-        body: this.buildBody(request)
+        body: JSON.stringify(this.buildBody(request))
       })
     } catch (err) {
       throw new ModelNetworkError("Request failed", { cause: err })
@@ -142,7 +142,11 @@ class OpenAIModelClient extends ModelClient {
           "Accept": "application/json",
           "Authorization": `Bearer ${this.apiKey}`
         },
-        body: this.buildBody(request, true)
+        body: JSON.stringify({
+          ...this.buildBody(request),
+          stream: true,
+          inculde_usage: true
+        })
       })
     } catch (err) {
       throw new ModelNetworkError("Request failed", { cause: err })
@@ -275,11 +279,62 @@ class OpenAIModelClient extends ModelClient {
     }
   }
 
-  structuredOutput<T extends ZodType>(request: ModelRequest, schema: T): Promise<output<T>> {
-    throw new Error("Method not implemented.")
+  async structuredOutput<T extends ZodType>(
+    request: ModelRequest, 
+    schema: T, 
+    responseFormat: "json_object" | "json_schema" = "json_object"
+  ): Promise<output<T>> {
+    let response: Response
+    const { $schema, ...jsonSchema } = z.toJSONSchema(schema)
+
+    try {
+      response = await fetch(this.baseURL, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+          "Authorization": `Bearer ${this.apiKey}`
+        },
+        body: JSON.stringify({
+          ...this.buildBody(request),
+          response_format: {
+            type: responseFormat,
+            ...(responseFormat === "json_schema" ? {
+              name: "response",
+              strict: true,
+              schema: jsonSchema
+            } : {})
+          }
+        })
+      })
+    } catch (err) {
+      throw new ModelNetworkError("Request failed", { cause: err })
+    }
+
+    if (!response.ok) {
+      const body = await response.text()
+      throw new ModelHTTPError(`OpenAI API error: ${response.status}`, { statusCode: response.status, responseBody: body })
+    }
+
+    const data = await response.json() as OpenAIResponse
+    const raw = data.choices[0]!.message.content
+
+    if (!raw) {
+      throw new StructuredOutputParseError("Model returned empty content", { rawResponse: "" })
+    }
+
+    try {
+      const parsed = JSON.parse(raw)
+      return schema.parse(parsed) as output<T>
+    } catch (err) {
+      throw new StructuredOutputParseError(
+            "Failed to parse structured output",
+            { rawResponse: raw, cause: err }
+          )
+    }
   }
 
-  private buildBody(request: ModelRequest, isStream: boolean = false) {
+  private buildBody(request: ModelRequest) {
     let bindTools = undefined
     if (request.tools) {
       bindTools = request.tools.map(tool => {
@@ -318,15 +373,14 @@ class OpenAIModelClient extends ModelClient {
       }
     }
 
+
     const data = {
       model: request.model,
       messages: this.convertMessages(request.system, request.messages),
       ...(bindTools !== undefined ? { tools: bindTools } : {}),
-      ...(samplingArgs !== undefined ? samplingArgs : {}),
-      stream: isStream,
-      ...(isStream ? { include_usage: true } : {})
+      ...(samplingArgs !== undefined ? samplingArgs : {})
     }
-    return JSON.stringify(data)
+    return data
   }
 
   private convertMessages(system: string | undefined, messages: ModelMessage[]): OpenAIModelMessage[] {
