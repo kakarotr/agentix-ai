@@ -3,7 +3,7 @@ import { AssistantContentBlock, TextBlock, ToolUseBlock } from "@/messages/conte
 import { ModelClient } from "@/model-client/client.js"
 import { MessageStreamEvent, ModelRequest, ModelResponse, StopReason, Usage } from "@/model-client/types.js"
 import { ModelMessage } from "@/messages/message.js"
-import { ModelHTTPError, ModelNetworkError, StructuredOutputParseError } from "@/model-client/errors.js"
+import { ModelHTTPError, StructuredOutputParseError } from "@/model-client/errors.js"
 import { createParser } from "eventsource-parser"
 import { EventSourceParserStream } from "eventsource-parser/stream"
 
@@ -106,59 +106,20 @@ interface OpenAIToolCallChunk {
 
 class OpenAIModelClient extends ModelClient {
   async generate(request: ModelRequest): Promise<ModelResponse> {
-    let response: Response
-
-    try {
-      response = await fetch(this.baseURL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify(this.buildBody(request))
-      })
-    } catch (err) {
-      throw new ModelNetworkError("Request failed", { cause: err })
-    }
-
-    if (!response.ok) {
-      const body = await response.text()
-      throw new ModelHTTPError(`OpenAI API error: ${response.status}`, { statusCode: response.status, responseBody: body })
-    }
-
+    const response = await this.fetchPost(this.buildBody(request))
     const data = await response.json() as OpenAIResponse
     return this.convertResponse(data)
   }
 
   async *stream(request: ModelRequest): AsyncIterable<MessageStreamEvent> {
-    let response: Response
-
-    try {
-      response = await fetch(this.baseURL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          ...this.buildBody(request),
-          stream: true,
-          inculde_usage: true
-        })
-      })
-    } catch (err) {
-      throw new ModelNetworkError("Request failed", { cause: err })
-    }
-    
-    if (!response.ok) {
-      const body = await response.text()
-      throw new ModelHTTPError(`OpenAI API error: ${response.status}`, { statusCode: response.status, responseBody: body })
-    }
+    const response = await this.fetchPost({
+      ...this.buildBody(request),
+      stream: true,
+      inculde_usage: true
+    })
 
     if (!response.body) {
-      throw new ModelHTTPError(`OpenAI API error: ${response.status}`, { statusCode: response.status, responseBody: "null" })
+      throw new ModelHTTPError(`OpenAI API error: response body is null`, { statusCode: 0, responseBody: "null" })
     }
 
     const eventStream = response.body
@@ -284,37 +245,19 @@ class OpenAIModelClient extends ModelClient {
     schema: T, 
     responseFormat: "json_object" | "json_schema" = "json_object"
   ): Promise<output<T>> {
-    let response: Response
     const { $schema, ...jsonSchema } = z.toJSONSchema(schema)
 
-    try {
-      response = await fetch(this.baseURL, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Accept": "application/json",
-          "Authorization": `Bearer ${this.apiKey}`
-        },
-        body: JSON.stringify({
-          ...this.buildBody(request),
-          response_format: {
-            type: responseFormat,
-            ...(responseFormat === "json_schema" ? {
-              name: "response",
-              strict: true,
-              schema: jsonSchema
-            } : {})
-          }
-        })
-      })
-    } catch (err) {
-      throw new ModelNetworkError("Request failed", { cause: err })
-    }
-
-    if (!response.ok) {
-      const body = await response.text()
-      throw new ModelHTTPError(`OpenAI API error: ${response.status}`, { statusCode: response.status, responseBody: body })
-    }
+    const response = await this.fetchPost({
+      ...this.buildBody(request),
+      response_format: {
+        type: responseFormat,
+        ...(responseFormat === "json_schema" ? {
+          name: "response",
+          strict: true,
+          schema: jsonSchema
+        } : {})
+      }
+    })
 
     const data = await response.json() as OpenAIResponse
     const raw = data.choices[0]!.message.content
